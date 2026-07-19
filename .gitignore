@@ -28,5 +28,16 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# duofetch project binaries and build output
+/duofetch
+/duofetch.exe
+/dist/
+/bin/
+/build/
+
+# OS cruft
+.DS_Store
+Thumbs.db

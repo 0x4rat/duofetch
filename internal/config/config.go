@@ -1,0 +1,216 @@
+// Copyright (C) 2026 4rat
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+package config
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+// Config is the full runtime configuration for duofetch.
+type Config struct {
+	Display  DisplayConfig  `toml:"display"`
+	Summary  SectionConfig  `toml:"summary"`
+	Detailed DetailedConfig `toml:"detailed"`
+
+	// Runtime-only overrides set by CLI flags; never read from TOML.
+	NoColor bool `toml:"-"`
+	NoLogo  bool `toml:"-"`
+}
+
+// DisplayConfig controls visual presentation.
+type DisplayConfig struct {
+	NoColor     bool   `toml:"no_color"`
+	NoLogo      bool   `toml:"no_logo"`
+	AccentColor string `toml:"accent_color"`
+	CustomLogo  string `toml:"custom_logo"`
+}
+
+// SectionConfig toggles for the compact summary view.
+type SectionConfig struct {
+	ShowOS       bool `toml:"show_os"`
+	ShowKernel   bool `toml:"show_kernel"`
+	ShowHostname bool `toml:"show_hostname"`
+	ShowUptime   bool `toml:"show_uptime"`
+	ShowShell    bool `toml:"show_shell"`
+	ShowCPU      bool `toml:"show_cpu"`
+	ShowRAM      bool `toml:"show_ram"`
+	ShowDisks    bool `toml:"show_disks"`
+	ShowNetwork  bool `toml:"show_network"`
+}
+
+// DetailedConfig toggles for the -d detailed view.
+type DetailedConfig struct {
+	ShowOS            bool `toml:"show_os"`
+	ShowKernel        bool `toml:"show_kernel"`
+	ShowHostname      bool `toml:"show_hostname"`
+	ShowUptime        bool `toml:"show_uptime"`
+	ShowCPU           bool `toml:"show_cpu"`
+	ShowRAM           bool `toml:"show_ram"`
+	ShowSwap          bool `toml:"show_swap"`
+	ShowDisks         bool `toml:"show_disks"`
+	ShowDiskIO        bool `toml:"show_disk_io"`
+	ShowNetwork       bool `toml:"show_network"`
+	ShowNetThroughput bool `toml:"show_net_throughput"`
+	ShowLoad          bool `toml:"show_load"`
+	ShowProcesses     bool `toml:"show_processes"`
+}
+
+// Defaults returns a Config populated with sensible defaults.
+func Defaults() Config {
+	return Config{
+		Display: DisplayConfig{
+			AccentColor: "cyan",
+		},
+		Summary: SectionConfig{
+			ShowOS:       true,
+			ShowKernel:   true,
+			ShowHostname: true,
+			ShowUptime:   true,
+			ShowShell:    true,
+			ShowCPU:      true,
+			ShowRAM:      true,
+			ShowDisks:    true,
+			ShowNetwork:  true,
+		},
+		Detailed: DetailedConfig{
+			ShowOS:            true,
+			ShowKernel:        true,
+			ShowHostname:      true,
+			ShowUptime:        true,
+			ShowCPU:           true,
+			ShowRAM:           true,
+			ShowSwap:          true,
+			ShowDisks:         true,
+			ShowDiskIO:        true,
+			ShowNetwork:       true,
+			ShowNetThroughput: true,
+			ShowLoad:          true,
+			ShowProcesses:     true,
+		},
+	}
+}
+
+// ConfigPath returns the platform-appropriate path for the config file.
+// Linux/macOS: ~/.config/duofetch/config.toml
+// Windows:     %AppData%\duofetch\config.toml
+func ConfigPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "duofetch", "config.toml"), nil
+}
+
+// Load reads the config file if present, falling back to defaults on any error.
+func Load() Config {
+	cfg := Defaults()
+
+	path, err := ConfigPath()
+	if err != nil {
+		return cfg
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return cfg
+	}
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "duofetch: warning: could not parse config: %v\n", err)
+		return Defaults()
+	}
+	return cfg
+}
+
+// Generate writes the default commented config to the standard location.
+// If the file already exists, it prompts for confirmation unless force is set.
+func Generate(force bool) {
+	path, err := ConfigPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "duofetch: error: cannot determine config path: %v\n", err)
+		os.Exit(1)
+	}
+
+	if _, err := os.Stat(path); err == nil && !force {
+		fmt.Printf("Config already exists at: %s\n", path)
+		fmt.Print("Overwrite? [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Aborted.")
+			return
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "duofetch: error: cannot create config directory: %v\n", err)
+		os.Exit(1)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "duofetch: error: cannot write config: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	f.WriteString(defaultTOML)
+	fmt.Printf("Config written to: %s\n", path)
+}
+
+const defaultTOML = `# duofetch configuration
+# Generated by: duofetch --gen-config
+# CLI flags --no-color and --no-logo override the settings below.
+
+[display]
+# Disable all ANSI color output.
+no_color = false
+
+# Hide the ASCII logo in the summary (default) view.
+no_logo = false
+
+# Accent color for labels and section headers.
+# Options: red, green, yellow, blue, magenta, cyan, white, orange
+accent_color = "cyan"
+
+# Path to a custom ASCII art file to use instead of the built-in logo.
+# Leave commented out to use the auto-detected distro logo.
+# custom_logo = "/path/to/my-logo.txt"
+
+# ── Summary view (default, instant) ─────────────────────────────────────────
+[summary]
+show_os       = true   # OS name and version
+show_kernel   = true   # kernel version
+show_hostname = true   # machine hostname
+show_uptime   = true   # system uptime
+show_shell    = true   # current shell
+show_cpu      = true   # CPU model and core count
+show_ram      = true   # RAM used / total
+show_disks    = true   # root disk used / total
+show_network  = true   # primary interface and IP
+
+# ── Detailed view (-d, ~1s due to live rate sampling) ────────────────────────
+[detailed]
+show_os              = true   # OS name and version
+show_kernel          = true   # kernel version and architecture
+show_hostname        = true   # machine hostname
+show_uptime          = true   # system uptime
+show_cpu             = true   # CPU model, core counts, per-core usage
+show_ram             = true   # RAM used/free/total/cached
+show_swap            = true   # swap used / total
+show_disks           = true   # all real partitions with usage
+show_disk_io         = true   # live disk read/write throughput
+show_network         = true   # all network interfaces with addresses
+show_net_throughput  = true   # live per-interface upload/download rate
+show_load            = true   # load averages (Linux only)
+show_processes       = true   # number of running processes
+`
